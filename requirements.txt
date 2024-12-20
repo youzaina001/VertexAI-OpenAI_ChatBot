@@ -1,0 +1,8 @@
+streamlit
+requests
+matplotlib
+langchain_community
+langchain_openai
+faiss-cpu
+openai
+seaborn
