@@ -5,4 +5,11 @@ langchain_community
 langchain_openai
 faiss-cpu
 openai
+grok
 seaborn
+pandas
+torch
+sentence-transformers
+google-cloud-aiplatform
+google-auth
+vertexai
