@@ -1,5 +1,7 @@
 streamlit
+fastapi
 requests
+uvicorn
 matplotlib
 langchain_community
 langchain_openai
@@ -7,9 +9,9 @@ faiss-cpu
 openai
 grok
 seaborn
+plotly
 pandas
 torch
-sentence-transformers
 google-cloud-aiplatform
 google-auth
 vertexai
