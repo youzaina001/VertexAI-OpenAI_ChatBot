@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import logging
+import requests
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -14,7 +15,7 @@ from openai import OpenAI
 
 client = OpenAI()
 from google.cloud import aiplatform
-from vertexai.language_models import TextGenerationModel
+from vertexai.language_models import TextGenerationModel,TextEmbeddingModel
 
 # Load environment variables
 load_dotenv()
@@ -60,8 +61,8 @@ def load_knowledge_base(provider=EMBEDDING_PROVIDER):
             aiplatform.init(project=PROJECT_ID, location=LOCATION)
 
             # Vertex AI Embeddings
-            model = TextGenerationModel.from_pretrained("text-bison")
-            embeddings = lambda texts: [model.predict(text).embeddings for text in texts]
+            model = TextEmbeddingModel.from_pretrained("text-embedding-005")
+            embeddings = lambda texts: [embedding.values for embedding in model.get_embeddings(texts if isinstance(texts, list) else [texts])]
 
             # Load the FAISS Index
             st.info(f"Loading FAISS index with {provider} embeddings...")
@@ -75,123 +76,143 @@ def load_knowledge_base(provider=EMBEDDING_PROVIDER):
         st.error(f"Failed to load knowledge base using {provider}: {e}")
         return None
 
-# Query Knowledge Base
-def query_knowledge_base(docsearch, query, k=3):
+# Query the loaded knowledge base
+def query_knowledge_base(docsearch, question):
     try:
-        results = docsearch.similarity_search_with_score(query, k=k)
-        contexts = []
-        for doc, score in results:
-            contexts.append(doc.page_content)
-        return contexts
-    except Exception as e:
-        return f"Error querying knowledge base: {e}"
+        # Initialize the Chat model
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
 
-# AI Query Processor
-def ask_gpt(query, context):
-    try:
-        # Format the messages for the chat model
-        messages = [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": f"Context: {context}\n\nQuestion: {query}"}
-        ]
+        # Search the knowledge base for similar content
+        result = docsearch.similarity_search_with_score(question, k=1)
 
-        # Use the new ChatCompletion API
-        response = client.chat.completions.create(model="gpt-4o-mini",
-        messages=messages,
-        temperature=0.7,
-        max_tokens=150)
+        if result and len(result) > 0:
+            doc_content, score = result[0]
 
-        # Extract and return the assistant's reply
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        return f"Error with GPT-4 query: {e}"
+            # Construct a prompt with context and question
+            prompt = f"You are a helpful assistant. Based on this context: '{doc_content.page_content}', answer the question: {question}"
 
-# Initialize Vertex AI (with Llama 3.1 model)
-def init_vertex_ai():
-    if not PROJECT_ID or not LOCATION:
-        raise ValueError("Vertex AI Project ID or Location is missing. Set these in environment variables.")
-
-    aiplatform.init(project=PROJECT_ID, location=LOCATION)
-
-    # Initialize Llama 3.1 Model
-    llama_model = TextGenerationModel.from_pretrained("llama-3.1")
-    return llama_model
-
-# Query Knowledge Base using Vertex AI (Llama 3.1)
-def ask_llama_3_1(query, context):
-    try:
-        llama_model = init_vertex_ai()
-
-        # Construct prompt for Llama 3.1
-        prompt = f"Context: {context}\n\nQuestion: {query}"
-
-        # Query Llama 3.1 for response
-        response = llama_model.predict(prompt)
-        return response.text
-    except Exception as e:
-        return f"Error with Llama 3.1 query: {e}"
-
-# Update AI Query Processor to Use Llama 3.1
-def ask_ai(query, context):
-    try:
-        # Use Llama 3.1 model instead of GPT-4
-        response = ask_llama_3_1(query, context)
-        return response
-    except Exception as e:
-        return f"Error with AI query: {e}"
-
-# Visualization Function
-def generate_plot(df, query):
-    try:
-        # Infer plot type based on query keywords
-        if "distribution" in query.lower() or "histogram" in query.lower():
-            fig = px.histogram(df, x=df.columns[0], title="Histogram")
-        elif "trend" in query.lower() or "line" in query.lower():
-            fig = px.line(df, x=df.columns[0], y=df.columns[1], title="Trend Analysis")
-        elif "correlation" in query.lower() or "scatter" in query.lower():
-            fig = px.scatter(df, x=df.columns[0], y=df.columns[1], title="Correlation Analysis")
+            # Generate a response using the chat model
+            response = llm.predict(prompt)
+            return response  # Return the generated response
         else:
-            fig = px.bar(df, x=df.columns[0], y=df.columns[1], title="Bar Chart")
-        st.plotly_chart(fig)
+            return "No relevant information found in the knowledge base."
     except Exception as e:
-        st.error(f"Plotting error: {e}")
+        return f"Error querying the knowledge base: {e}"
 
-# Streamlit App
-st.title("AI Financial Assistant")
-st.write("Upload a dataset and query insights using AI and knowledge base search.")
+def ask_gpt(query):
 
-# Load Knowledge Base
+    url = "https://api.openai.com/v1/chat/completions"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {OPENAI_API_KEY}"
+    }
+    conversation_history = []
+    prompt = query
+    conversation_history.append({"role": "user", "content": prompt})
+    data = {
+        "model": "gpt-4o-mini", 
+        "messages": conversation_history,
+        "temperature": 0.7
+    }
+
+    response = requests.post(url, headers=headers, json=data)
+    if response.status_code == 200:
+        response_json = response.json()
+        message_content = response_json['choices'][0]['message']['content']
+        return message_content
+    else:
+        return f"Error: {response.status_code}, {response.text}"
+
+# Streamlit app layout
+st.title("Your financial report assistant")
+# Sidebar options for navigation
+#option = st.sidebar.selectbox("Choose an option", ("Chat with GPT", "Generate Insights and Plot"))
+
+
+st.write("Generate dataviz and financial reports in a simple way by prompting")
 docsearch = load_knowledge_base()
-if not docsearch:
-    st.error("Knowledge base could not be loaded.")
-    st.stop()
+st.write("Upload a dataset (CSV) to analyze.")
 
-# Dataset Upload
-data_location = st.text_input("CSV File Location:", "")
-if data_location and os.path.exists(data_location):
+# Upload CSV
+# dataset_file = st.file_uploader("Upload CSV file", type="csv")
+
+# User input
+
+data_location = st.text_input("Your csv location:", "",)
+
+if os.path.exists(data_location):
     df = pd.read_csv(data_location)
-    st.write("**Dataset Preview:**")
-    st.dataframe(df.head(10))
+    cols = ", ".join(df.columns)
+    csv_text = df.head(100).to_csv(index=False)
+    
+    try:
+        TemplateBegin = '''
+        Your are a great statistician which have great skill in
+        data analysis and data visualation. Your python programming skills is good outstanding
+        '''
 
-    # User Query Input
-    user_query = st.text_area("Enter your query:")
-    if st.button("Search Knowledge Base"):
-        if user_query.strip():
-            # Search Knowledge Base
-            context_results = query_knowledge_base(docsearch, user_query)
-            context = " ".join(context_results)
+        # Ask GPT to generate insights from the dataset
+        cols = ", ".join(df.columns)
+        csv_text = df.head(20).to_csv(index=False)
 
-            # AI Insights
-            st.write("**AI-Generated Insights:**")
-            response = ask_gpt(user_query, context)
-            st.text(response)
+        # head_query = """Make an analysis like a data scientist 
+        # """
+        user_query = st.text_area("Ask a question about the dataset:")
+        # user_query += head_query
+        if st.button("Ask GPT"):
+            if user_query.strip():
+                with st.spinner("Generating insights..."):
+                    bot_response = query_knowledge_base(docsearch, user_query)
+                st.write(f"**Bot's Insights:** {bot_response}")
+            else:
+                st.error("Please enter a question about the dataset!")
 
-    # Visualization Generation
-    if st.button("Generate Visualization"):
-        if df is not None:
-            st.write("**Data Visualization:**")
-            generate_plot(df, user_query)
-        else:
-            st.error("Please upload a valid dataset.")
-else:
-    st.warning("Please provide a valid CSV file location.")
+
+        seaborn_theme = """ sns.set_theme(
+            style = 'whitegrid', 
+            palette = 'colorblind', 
+            font = 'Arial', 
+            rc = {
+            'axes.spines.top': False, 
+            'axes.spines.right': False, 
+            'axes.spines.left': False,             
+            'grid.linestyle': '-.',
+            'text.color': '#010035',
+            'font.family': 'Arial',
+            'xtick.color': '#333333',
+            'ytick.color': '#333333',
+            'grid.color': '#f0f0f0'
+            }
+        )"""
+
+        # Dashbord
+        head_query_plot = f"""Here are the columns of the file of my csv: {cols}
+        Here is the 20 first lines of my csv
+        {csv_text}
+
+        The location of my csv is {data_location}
+        """
+
+        TemplateEnd = f"""(Generate A full python Code (use pandas to read a csv (and matplotlib as plt if needed)),
+        use seaborn with this theme {seaborn_theme} to create a pertinent dashbord according to the data,
+        you can use multiple type of garphics to create a beautiful and readable dashbord.
+        Choose pertinent graphics according to the data
+        Return only the python code.
+        Give a return that can be run directly with exec and lanchable in streamlit
+        Make sure that the code is runnable
+        """
+        plot_query = TemplateBegin + head_query_plot + user_query + TemplateEnd
+        # Example plot (you can modify this part to plot specific columns or analyses)
+        if st.button("Generate Plot"):
+            if plot_query.strip():
+                with st.spinner("Generating insights..."):
+                    response = ask_gpt(plot_query)
+                    # st.write(response)
+                    r = response.split("```")[1].replace("python", "")
+                    exec(r)
+            
+            else:
+                st.error("A.")
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
