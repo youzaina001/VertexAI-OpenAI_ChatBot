@@ -1,4 +1,4 @@
-Datathon_OpenAI_ChatBot is a Python-based chatbot developed for a datathon event. This project demonstrates the integration of OpenAI & VertexAI technologies to create an interactive and intelligent conversational agent, including real-time context handling and customizable responses.
+VertexAI_OpenAI_RAG_ChatBot is a Python-based chatbot developed for a datathon event. This project demonstrates the integration of OpenAI & VertexAI technologies to create an interactive and intelligent conversational agent, including real-time context handling and customizable responses.
 
 ## Features
 
